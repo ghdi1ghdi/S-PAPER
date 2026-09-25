@@ -1,0 +1,59 @@
+x-backend: &backend
+  build: ./backend
+  env_file: .env
+  restart: unless-stopped
+  depends_on:
+    db: {condition: service_healthy}
+    redis: {condition: service_healthy}
+    migrate: {condition: service_completed_successfully}
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-papers}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    command: [redis-server, --appendonly, 'yes']
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+  migrate:
+    build: ./backend
+    env_file: .env
+    command: [alembic, upgrade, head]
+    depends_on:
+      db: {condition: service_healthy}
+  api:
+    <<: *backend
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')"]
+      interval: 15s
+      retries: 10
+  worker:
+    <<: *backend
+    command: [celery, -A, app.tasks.celery, worker, --loglevel=WARNING, --concurrency=2]
+  scheduler:
+    <<: *backend
+    command: [celery, -A, app.tasks.celery, beat, --loglevel=WARNING, --schedule=/app/beat/celerybeat-schedule]
+    volumes: [beat_data:/app/beat]
+  web:
+    build: ./web
+    ports: ['127.0.0.1:3000:3000']
+    depends_on:
+      api: {condition: service_healthy}
+    restart: unless-stopped
+volumes:
+  postgres_data:
+  redis_data:
+  beat_data:
