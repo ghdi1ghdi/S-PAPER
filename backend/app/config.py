@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     session_hours: int = 24
     serpapi_api_key: str = ""
     crossref_mailto: str = ""
+    openalex_api_key: str = ""
+    semantic_scholar_api_key: str = ""
+    relevance_min_score: float = Field(0.34, ge=0, le=1)
     llm_provider: Literal["openai", "gemini"] = "openai"
     openai_api_key: str = ""
     openai_model: str = ""
@@ -34,6 +37,7 @@ class Settings(BaseSettings):
     llm_max_calls_per_job: int = Field(100, ge=0)
     llm_max_output_tokens: int = Field(1000, ge=100)
     demo_mode: bool = False
+    api_docs: bool = False
     run_live_api_tests: bool = False
     publisher_allowed_hosts: str = ""
 

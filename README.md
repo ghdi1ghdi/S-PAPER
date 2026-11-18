@@ -35,7 +35,9 @@ docker compose down
 | 환경변수 | 역할 |
 |---|---|
 | `SERPAPI_API_KEY` | 실제 Google Scholar 검색. 빈 값·`your_serpapi_api_key`는 CONFIGURATION_ERROR |
-| `CROSSREF_MAILTO` | Crossref 연락처, polite pool 및 식별 가능한 User-Agent |
+| `CROSSREF_MAILTO` | Crossref 연락처, polite pool 및 식별 가능한 User-Agent. OpenAlex `mailto`로도 사용 |
+| `OPENALEX_API_KEY`, `SEMANTIC_SCHOLAR_API_KEY` | 선택. 무료 키. 없으면 공용 한도를 나눠 써 보완 실패가 늘 수 있음 |
+| `RELEVANCE_MIN_SCORE` | 주제 관련도 컷(0–1, 기본 0.34). 미달 후보는 저장하지 않고 `filtered_count`로 집계 |
 | `LLM_PROVIDER` | `openai` 또는 `gemini` 중 하나 |
 | `OPENAI_API_KEY`, `OPENAI_MODEL` | OpenAI 선택 시 키와 Structured Outputs 지원 모델 |
 | `GEMINI_API_KEY`, `GEMINI_MODEL` | Gemini 선택 시 키와 JSON Schema 지원 모델 |
@@ -66,6 +68,18 @@ docker compose down
 설정 삭제는 보관 처리입니다. 누적 논문과 발견 이력을 보존합니다. 전체 논문/CSV는 여러 설정에 연결된 같은 Paper를 한 번만 보여줍니다. 다른 사용자의 설정·작업·논문·CSV에는 접근할 수 없습니다. 원본 외부 메타데이터는 내부에만 보관합니다.
 
 ## 데이터 원칙과 검색 정책
+
+### 정확도 파이프라인 (v0.2)
+
+1. **검색어**: 주제의 개념은 모두 필수, 주제에 없는 키워드는 하나만 맞아도 되는 OR 그룹입니다. Scholar에 구문 따옴표를 강제하지 않고, arXiv는 `ti:`/`abs:` 필드로 검색합니다.
+2. **Scholar 서지 파싱**: `publication_info.summary`("저자 - 학술지, 연도 - 호스트")에서 저자를 복원합니다(프로필 저자만 들어 있는 `authors` 필드 보완). 학술지명은 잘림·약어 때문에 저장하지 않고 매칭 근거(`venue_hint`)로만 씁니다. 링크 경로의 `/doi/10.x/...`는 DOI로 바로 사용합니다.
+3. **메타데이터·초록 보완 순서**: 허용 출판사 → OpenAlex(DOI 조회 또는 `title.search`, 역색인 초록 복원) → Crossref → Europe PMC(DOI) → Semantic Scholar(DOI·arXiv ID). 각 단계는 빈 필드만 채우고 provenance를 남깁니다.
+4. **단계형 동일성 판정**(제목 검색 결과): A) 제목 ≥0.94 + 연도·저자·학술지 중 2개, B) 5단어 이상 + 제목 ≥0.95 + 연도 ±1 + 저자 상충 없음, C) 5단어 이상 + 제목 ≥0.90 + 연도 ±1 + 첫 저자 성 일치. 4단어 이하는 정확 일치 + 근거 2개. 다른 DOI 후보와 유사도 차이가 0.03 미만이면 보류합니다. 저자 결측은 상충이 아니라 근거 없음으로 처리합니다.
+5. **관련도 재순위**: 페이지 전체를 보완한 뒤 제목·초록(없으면 snippet)으로 주제 관련도(0–1)를 계산해 높은 순으로 저장합니다. `RELEVANCE_MIN_SCORE` 미만은 건너뜁니다. 점수는 수집 설정별로 저장되며 논문 목록에서 관련도순 정렬이 가능합니다.
+
+설계는 Claude·Codex·Antigravity 3모델 토론(합의도 0.82)으로 정했습니다. 토론에서 나온 로컬 cross-encoder 재순위와 LLM 관련도 판정은 Docker 이미지 크기와 비용 문제로 이번에는 넣지 않았습니다. 임계값은 주제별로 라벨 50–100건을 붙여 보정하는 것을 권장합니다.
+
+### 기존 원칙
 
 - 필수 7항목: 제목, 저널, 저널 IF 지수, 발표년도, DOI, 초록, AI 논문 요약. 제목이 없는 후보는 사유를 기록하고 건너뜁니다. 나머지 미확보 값은 NULL/빈 셀입니다. snippet은 초록과 별도 저장합니다.
 - Scholar publication_info 원문 보존, 유일하게 확인되는 연도만 분리. 저널명이 모호한 문자열은 보수적으로 NULL로 두고 Crossref 또는 허용된 출판사 메타데이터로 보완합니다.

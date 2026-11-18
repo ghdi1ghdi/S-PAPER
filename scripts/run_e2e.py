@@ -18,7 +18,8 @@ ENV.update(DATABASE_URL=os.environ.get('TEST_POSTGRES_URL','postgresql+psycopg:/
     REDIS_URL=os.environ.get('TEST_REDIS_URL','redis://127.0.0.1:56379/2'),APP_SECRET_KEY=secrets.token_urlsafe(48),
     APP_ORIGIN='http://localhost:3000',SERPAPI_API_KEY='fixture-only-no-network',OPENAI_API_KEY='',OPENAI_MODEL='',
     API_INTERNAL_URL='http://127.0.0.1:8000',E2E_PASSWORD=os.environ.get('E2E_PASSWORD',secrets.token_urlsafe(20)),
-    DEMO_MODE='true',RUN_LIVE_API_TESTS='false',PLAYWRIGHT_BROWSERS_PATH=str(ROOT/'.tools/playwright'))
+    # Fixture papers are deliberately off-topic (plants, HERA physics); disable the relevance cut here.
+    RELEVANCE_MIN_SCORE='0',DEMO_MODE='true',RUN_LIVE_API_TESTS='false',PLAYWRIGHT_BROWSERS_PATH=str(ROOT/'.tools/playwright'))
 if NODE.exists():
     ENV['PATH']=str(NODE)+os.pathsep+ENV['PATH']
 LOGS=ROOT/'test-results'

@@ -23,7 +23,10 @@ from .metrics import import_metrics
 # Never log HTTPX request URLs: SerpApi credentials are query parameters.
 for name in ("httpx", "httpcore", "openai", "google.genai"):
     logging.getLogger(name).setLevel(logging.CRITICAL)
-app = FastAPI(title="S-PAPER", version="0.1.0")
+# Interactive API docs expose every route and schema; keep them off unless explicitly enabled.
+_docs = settings().api_docs
+app = FastAPI(title="S-PAPER", version="0.1.0", docs_url="/docs" if _docs else None,
+              redoc_url="/redoc" if _docs else None, openapi_url="/openapi.json" if _docs else None)
 
 
 @app.middleware("http")
@@ -157,7 +160,7 @@ def filters(title: str = "", journal: str = "", year: int | None = Query(None, g
     source: Literal["", "google_scholar", "arxiv", "both"] = "", subscription_id: int | None = None,
     collected_from: datetime | None = None, collected_to: datetime | None = None,
     summary_status: Literal["", "pending", "success", "failed", "configuration_error", "skipped_no_abstract", "retry_queued", "running"] = "",
-    sort: Literal["collected_desc", "collected_asc", "title", "year_desc"] = "collected_desc"):
+    sort: Literal["collected_desc", "collected_asc", "title", "year_desc", "relevance_desc"] = "collected_desc"):
     return locals()
 
 

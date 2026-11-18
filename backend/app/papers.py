@@ -39,8 +39,14 @@ def paper_query(user_id, filters):
         query = query.where(func.coalesce(latest, "pending") == filters["summary_status"])
     collected = select(func.min(SubscriptionPaper.discovered_at)).join(Subscription).where(
         SubscriptionPaper.paper_id == Paper.id, Subscription.user_id == user_id).correlate(Paper).scalar_subquery()
+    relevance = select(func.max(SubscriptionPaper.relevance)).join(Subscription).where(
+        SubscriptionPaper.paper_id == Paper.id, Subscription.user_id == user_id)
+    if filters.get("subscription_id"):
+        relevance = relevance.where(Subscription.id == filters["subscription_id"])
+    relevance = relevance.correlate(Paper).scalar_subquery()
     sort = filters.get("sort", "collected_desc")
     order = {"title": Paper.title.asc(), "year_desc": Paper.publication_year.desc().nullslast(),
+             "relevance_desc": relevance.desc().nullslast(),
              "collected_asc": collected.asc(), "collected_desc": collected.desc()}[sort]
     return query.order_by(order, Paper.id.asc())
 
@@ -51,7 +57,9 @@ def paper_dto(db, p, user_id):
     sources = list(db.scalars(select(PaperSource).where(PaperSource.paper_id == p.id)))
     collected = db.scalar(select(func.min(SubscriptionPaper.discovered_at)).join(Subscription).where(
         SubscriptionPaper.paper_id == p.id, Subscription.user_id == user_id))
-    return {"id": p.id, "title": p.title, "journal": p.journal,
+    relevance = db.scalar(select(func.max(SubscriptionPaper.relevance)).join(Subscription).where(
+        SubscriptionPaper.paper_id == p.id, Subscription.user_id == user_id))
+    return {"relevance": relevance,"id": p.id, "title": p.title, "journal": p.journal,
         "journal_impact_factor": metric.impact_factor if metric else None,
         "publication_year": p.publication_year, "doi": p.doi, "abstract": p.abstract,
         "ai_summary": summary.ai_summary if summary and summary.status == "success" else None,
