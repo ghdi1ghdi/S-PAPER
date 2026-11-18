@@ -12,7 +12,7 @@ test('설정 → 실제 작업 큐 → 누적 목록 → 상세 → 전체 CSV',
   await dialog.getByLabel('연구 주제').fill('EEG brain age');
   await dialog.getByLabel('키워드 · 쉼표로 구분').fill('EEG, brain age');
   await dialog.getByRole('button',{name:'실제 검색어 미리보기'}).click();
-  await expect(dialog.getByText('all:EEG AND all:"brain age"',{exact:true})).toBeVisible();
+  await expect(dialog.getByText('(ti:EEG OR abs:EEG) AND (ti:"brain age" OR abs:"brain age")',{exact:true})).toBeVisible();
   await dialog.getByRole('button',{name:'수집 설정 저장'}).click();
   await expect(dialog).not.toBeVisible();
   await page.getByRole('button',{name:'지금 수집',exact:true}).first().click();

@@ -12,11 +12,13 @@ from .models import Paper, PaperSource, SubscriptionPaper, CollectionJobPaper, S
 from .providers.base import Candidate, SearchPage, norm_title, ProviderError, sanitize
 from .providers.enrichment import CrossrefMetadataEnricher, author_keys
 from .providers.publisher import PublisherMetadataEnricher
+from .providers.scholarly import OpenAlexEnricher, EuropePMCEnricher, SemanticScholarEnricher
 from .providers.scholar import GoogleScholarProvider
 from .providers.arxiv import ArxivProvider
 from .providers.http import HTTPGateway
 from .queries import build_queries
 from .summaries import summarize_paper, current_summary
+from .relevance import candidate_relevance
 
 
 def storage_lock(db):
@@ -64,7 +66,7 @@ def find_paper(db, c):
     return None
 
 
-def save_candidate(db, job, c, allow_new=True):
+def save_candidate(db, job, c, allow_new=True, relevance=None):
     storage_lock(db)
     paper = find_paper(db, c)
     inserted, enriched = paper is None, False
@@ -110,7 +112,10 @@ def save_candidate(db, job, c, allow_new=True):
         source.source_version, source.retrieved_at = c.source_version, now()
     prior = db.get(CollectionJobPaper, (job.id, paper.id))
     if existing_link is None:
-        db.add(SubscriptionPaper(subscription_id=job.subscription_id, paper_id=paper.id, first_job_id=job.id))
+        db.add(SubscriptionPaper(subscription_id=job.subscription_id, paper_id=paper.id, first_job_id=job.id,
+                                 relevance=relevance))
+    elif relevance is not None and (existing_link.relevance is None or relevance > existing_link.relevance):
+        existing_link.relevance = relevance
     if prior is None:
         db.add(CollectionJobPaper(job_id=job.id, paper_id=paper.id, outcome="duplicate" if existing_link else "new",
                                   inserted=inserted, enriched=enriched))
@@ -141,9 +146,42 @@ class CollectionService:
         self.usage = dict(job.usage)
         self.http = gateway or HTTPGateway(self.usage, self.deadline, on_usage=self.persist_usage)
         self.providers = providers if providers is not None else [GoogleScholarProvider(self.http), ArxivProvider(self.http)]
-        self.enrichers = enrichers if enrichers is not None else [PublisherMetadataEnricher(self.cfg.publisher_allowed_hosts), CrossrefMetadataEnricher(self.http)]
+        self.enrichers = enrichers if enrichers is not None else [
+            PublisherMetadataEnricher(self.cfg.publisher_allowed_hosts), OpenAlexEnricher(self.http),
+            CrossrefMetadataEnricher(self.http), EuropePMCEnricher(self.http), SemanticScholarEnricher(self.http)]
         self.summary_provider = summary_provider
         self.warnings = list(job.warnings)
+
+    def enrich(self, candidate):
+        for enricher in self.enrichers:
+            if time.monotonic() >= self.deadline:
+                break
+            try:
+                candidate = enricher.enrich(candidate)
+            except ProviderError as exc:
+                self.warnings.append(f"metadata:{exc.code}")
+            except Exception:
+                self.warnings.append("metadata:UPSTREAM_ERROR")
+        return candidate
+
+    def rank(self, candidates, snapshot):
+        """Enrich a whole page first, then order it by topic relevance (best first).
+
+        Scoring on the abstract instead of the short Scholar snippet is what makes the ranking
+        meaningful, so enrichment happens before ranking. Stable sort keeps the engine's own
+        order among equal scores.
+        """
+        scored = []
+        for candidate in candidates:
+            if time.monotonic() < self.deadline:
+                try:
+                    known = find_paper(self.db, candidate)
+                except ProviderError:
+                    known = None
+                if not known or not known.abstract or not known.doi:
+                    candidate = self.enrich(candidate)
+            scored.append((candidate, candidate_relevance(snapshot["topic"], snapshot["keywords"], candidate)))
+        return sorted(scored, key=lambda x: x[1], reverse=True)
 
     def persist_usage(self):
         self.job.usage = json.loads(json.dumps(self.usage))
@@ -240,23 +278,19 @@ class CollectionService:
         for p in providers:
             page = buffers.get(p.name)
             while page:
-                for candidate in page.candidates:
+                for candidate, score in self.rank(page.candidates, snapshot):
                     if time.monotonic() >= self.deadline:
                         self.warnings.append("TIME_BUDGET")
                         break
                     try:
                         quick = find_paper(db, candidate)
-                        if counts["new_count"] >= goal and not (quick and db.get(SubscriptionPaper, (sub.id, quick.id))):
+                        linked = bool(quick and db.get(SubscriptionPaper, (sub.id, quick.id)))
+                        if counts["new_count"] >= goal and not linked:
                             continue
-                        if not quick or not quick.abstract or not quick.doi:
-                            for enricher in self.enrichers:
-                                try:
-                                    candidate = enricher.enrich(candidate)
-                                except ProviderError as exc:
-                                    self.warnings.append(f"metadata:{exc.code}")
-                                except Exception:
-                                    self.warnings.append("metadata:UPSTREAM_ERROR")
-                        paper = save_candidate(db, job, candidate, counts["new_count"] < goal)
+                        if score < self.cfg.relevance_min_score and not linked:
+                            job.counts = dict(job.counts) | {"filtered_count": job.counts.get("filtered_count", 0) + 1}
+                            continue
+                        paper = save_candidate(db, job, candidate, counts["new_count"] < goal, score)
                         if paper:
                             llm = self.usage.setdefault("llm", {})
                             record = summarize_paper(db, paper, llm, provider=self.summary_provider, before_call=self.persist_usage) if time.monotonic() < self.deadline else None

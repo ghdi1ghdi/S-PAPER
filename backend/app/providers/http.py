@@ -35,7 +35,8 @@ class HTTPGateway:
         time.sleep(seconds)
 
     def throttle(self, source):
-        interval = {"arxiv": 3.05, "crossref": 1.0}.get(source)
+        interval = {"arxiv": 3.05, "crossref": 1.0, "openalex": 0.12, "europepmc": 0.2,
+                    "semantic_scholar": 1.05}.get(source)
         if not interval:
             return
         # Redis atomic slot reservation shares spacing across every worker and every retry.

@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Text, JSON, ForeignKey, UniqueConstraint, Index, CheckConstraint, DateTime
+from sqlalchemy import Float, String, Text, JSON, ForeignKey, UniqueConstraint, Index, CheckConstraint, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 from .db import Base, now
 
@@ -103,6 +103,8 @@ class SubscriptionPaper(Base):
     paper_id: Mapped[int] = mapped_column(ForeignKey("papers.id"), primary_key=True)
     first_job_id: Mapped[int] = mapped_column(ForeignKey("collection_jobs.id"))
     discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    # Topic relevance (0-1) of the paper for this subscription, see app/relevance.py.
+    relevance: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class CollectionJobPaper(Base):

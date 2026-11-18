@@ -57,7 +57,13 @@ def test_arxiv_errors(xml):
 
 
 def test_query_and_doi():
-    assert build_queries("EEG brain age", ["EEG", "brain age", "aging", "EEG"]) == {"google_scholar": "EEG brain age aging", "arxiv": 'all:EEG AND all:"brain age" AND all:aging'}
+    assert build_queries("EEG brain age", ["EEG", "brain age", "aging", "EEG"]) == {"google_scholar": "EEG brain age aging",
+        "arxiv": '(ti:EEG OR abs:EEG) AND (ti:"brain age" OR abs:"brain age") AND (ti:aging OR abs:aging)'}
+    # Extra keywords widen recall as one OR group; topic stopwords are not required terms.
+    q = build_queries("deep learning for sleep staging", ["sleep staging", "EEG", "polysomnography"])
+    assert q["google_scholar"] == "deep learning for sleep staging (EEG OR polysomnography)"
+    assert q["arxiv"] == ('(ti:"sleep staging" OR abs:"sleep staging") AND (ti:deep OR abs:deep) AND (ti:learning OR abs:learning)'
+                          ' AND (ti:EEG OR abs:EEG OR ti:polysomnography OR abs:polysomnography)')
     assert normalize_doi(" DOI: 10.1234/ABC(DEF). ") == "10.1234/abc(def)."
     assert normalize_doi("https://doi.org/10.1234/ABC%28d%29") == "10.1234/abc(d)"
     assert normalize_doi("not a doi") is None
@@ -71,7 +77,12 @@ def test_crossref_rejects_first_wrong_and_ambiguous():
     bad = good | {"title": ["Unrelated title"], "score": 9999, "DOI": "10.1234/bad"}
     assert crossref_match(c, [bad, good])[0]["DOI"] == "10.1234/good"
     assert crossref_match(c, [good, good | {"DOI": "10.1234/other"}])[0] is None
-    assert crossref_match(c, [good | {"author": []}])[0] is None
+    # Missing authors are "no evidence"; an exact long title from the same year is enough (tier B).
+    assert crossref_match(c, [good | {"author": []}])[0]["DOI"] == "10.1234/good"
+    # A different author list is a conflict and blocks tier B.
+    assert crossref_match(c, [good | {"author": [{"given": "Bob", "family": "Park"}]}])[0] is None
+    # Year more than one apart always rejects.
+    assert crossref_match(c, [good | {"published": {"date-parts": [[2020]]}}])[0] is None
     assert clean_abstract('<jats:p>Hi <b>there</b></jats:p><script>alert(1)</script>') == 'Hi there'
 
 
